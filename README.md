@@ -1,16 +1,16 @@
-# Narrow Streets Predictor
+# Street Quality Predictor
 
 A toolkit for extracting OpenStreetMap data (including `.osm.pbf`),  
-scoring each street segment for “narrowness,” and  
-training/applying a machine‑learning model to predict narrow streets.
+scoring each street segment for "quality," and  
+training/applying a machine‑learning model to predict quality streets.
 
 ---
 
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/arthurlch/osm-nsp.git
-cd narrow-streets
+git clone https://github.com/arthurlch/osm-rq.git
+cd osm-rq
 
 python3 -m venv venv
 source venv/bin/activate
@@ -31,7 +31,12 @@ osm-nsp/
 │   ├── pbf_loader.py
 │   ├── extract.py
 │   ├── visualization.py
-│   └── predict.py
+│   └── prediction/
+│       ├── __init__.py
+│       ├── train.py
+│       ├── evaluate.py
+│       ├── apply.py
+│       └── utils.py
 └── cli.py
 ```
 
@@ -53,52 +58,66 @@ python cli.py <command> [options]
     --network drive
   ```
 
-- **predict**  
+- **train**  
   Train & evaluate the Random Forest on scored data.  
   ```bash
-  python cli.py predict \
+  python cli.py train \
     --source "Tokyo, JP" \
     --network drive
   ```
 
+- **apply**  
+  Apply a trained model to a new region.  
+  ```bash
+  python cli.py apply \
+    --model models/street_quality_Tokyo_JP.joblib \
+    --source "Kyoto, JP"
+  ```
+
+- **list-models**  
+  List all available trained models.  
+  ```bash
+  python cli.py list-models
+  ```
+
 - **visualize**  
-  Render a Folium map from a CSV of edges with `score` or `predicted` columns.  
+  Render a Folium map from a CSV of edges with `quality_score` columns.  
   ```bash
   python cli.py visualize \
-    --input path/to/edges_with_scores.csv \
+    --input path/to/quality_streets.csv \
     --output map.html
   ```
 
 ---
 
-## 📐 Narrow‑Street Scoring
+## 📐 Street‑Quality Scoring
 
-For each edge *i*, we evaluate *J* boolean criteria \(C_{ij}\in\{0,1\}\).  The narrowness score is:
+For each edge *i*, we evaluate *J* boolean criteria \(C_{ij}\in\{0,1\}\).  The quality score is:
 
 $$
-\mathrm{score}_i \;=\;\frac{1}{J}\sum_{j=1}^{J} C_{ij}
-\qquad\bigl(0 \le \mathrm{score}_i \le 1\bigr)
+\mathrm{quality\_score}_i \;=\;\frac{1}{J}\sum_{j=1}^{J} C_{ij}
+\qquad\bigl(0 \le \mathrm{quality\_score}_i \le 1\bigr)
 $$
 
 Where each criterion is:
 
 | Criterion                        | Indicator                                                                                            |
 |----------------------------------|------------------------------------------------------------------------------------------------------|
-| **Width < 6 m**                  | \(C_{i1} = 1\) if \(\text{width}_i < 6\), else 0                                                      |
-| **Single lane**                  | \(C_{i2} = 1\) if \(\text{lanes}_i = 1\), else 0                                                     |
-| **Highway type ∈ T**             | \(C_{i3} = 1\) if \(\text{highway}_i \in T\), else 0                                                  |
-| **Service = “alley”**            | \(C_{i4} = 1\) if \(\text{service}_i = \text{"alley"}\), else 0                                       |
-| **Maxspeed < 30 km/h**           | \(C_{i5} = 1\) if \(\text{maxspeed}_i < 30\), else 0                                                 |
+| **Width < 6 m**                  | \(C_{i1} = 1\) if \(\text{width}_i < 6\), else 0                                                      |
+| **Single lane**                  | \(C_{i2} = 1\) if \(\text{lanes}_i = 1\), else 0                                                     |
+| **Highway type ∈ T**             | \(C_{i3} = 1\) if \(\text{highway}_i \in T\), else 0                                                  |
+| **Service = "alley"**            | \(C_{i4} = 1\) if \(\text{service}_i = \text{"alley"}\), else 0                                       |
+| **Maxspeed < 30 km/h**           | \(C_{i5} = 1\) if \(\text{maxspeed}_i < 30\), else 0                                                 |
 
 <div align="center">
-<em>T = {residential, living_street, service, track, path, footway}</em>
+<em>T = {residential, living_street, service, track, path, footway}</em>
 </div>
 
 ---
 
 ## 🤖 Prediction Model
 
-We train a Random Forest classifier to learn a mapping:
+We train a Random Forest classifier to learn a mapping:
 
 $$
 f: \mathbf{x}_i \;\longmapsto\; \hat y_i \in \{0,1\}
@@ -106,7 +125,7 @@ $$
 
 - **Feature vector** \(\mathbf{x}_i\) includes  
   \(`length`, `lanes`, `maxspeed`, `oneway`, `service`, …`\)  
-- **Target** \(\hat y_i = 1\) if edge is narrow, else 0  
+- **Target** \(\hat y_i = 1\) if edge is a quality street, else 0  
 
 ### Pipeline
 
@@ -135,6 +154,8 @@ $$
 - **Plots saved**:  
   - `confusion_matrix.png`  
   - `feature_importance.png`  
+  - `roc_curve.png`
+  - `precision_recall_curve.png`
 
 ---
 
@@ -148,13 +169,19 @@ $$
    ```
 2. **Train & Evaluate**  
    ```bash
-   python cli.py predict \
+   python cli.py train \
      --source "Tokyo, JP"
    ```
-3. **Visualize Results**  
+3. **Apply to New Region**
+   ```bash
+   python cli.py apply \
+     --model models/street_quality_Tokyo_JP.joblib \
+     --source "Kyoto, JP"
+   ```
+4. **Visualize Results**  
    ```bash
    python cli.py visualize \
-     --input narrow_Tokyo_JP.csv \
-     --output tokyo_map
+     --input predicted_quality_Kyoto_JP.csv \
+     --output kyoto_map
    ```
-   Then open `tokyo_map.html` in your browser.
+   Then open `kyoto_map.html` in your browser.
