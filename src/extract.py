@@ -1,51 +1,53 @@
-import osmnx as ox
 import pandas as pd
 import geopandas as gpd
-from .pbf_loader import load_pbf_network
+import networkx as nx
+from typing import Optional, Dict, Any, Union
 
-ox.config(use_cache=True, log_console=True)
-
-
-def load_network(source: str, network_type: str = 'drive') -> ox.graph.Graph:
-    if source.lower().endswith('.pbf'):
-        return load_pbf_network(source, network_type)
-    return ox.graph_from_place(source, network_type=network_type)
+from .adapters import get_adapter
 
 
-def extract_edges(graph: ox.graph.Graph) -> gpd.GeoDataFrame:
+def load_network(source: str, network_type: str = 'drive',
+                 adapter_type: Optional[str] = None,
+                 adapter_config: Optional[Dict[str, Any]] = None) -> Union[Any, nx.MultiDiGraph]:
     """
-    convert a graph's edges into a GeoDataFrame with key attr
+    Load a street network from a source using the appropriate adapter  (see readme for adapter)
     """
-    gdf = ox.graph_to_gdfs(graph, nodes=False, edges=True)
-    records = []
-    for u, v, key, data in graph.edges(keys=True, data=True):
-      # main attrs
-        records.append({
-            'u': u, 'v': v, 'key': key,
-            'name': data.get('name', 'Unnamed'),
-            'highway': data.get('highway'),
-            'lanes': data.get('lanes'),
-            'width': data.get('width'),
-            'maxspeed': data.get('maxspeed'),
-            'service': data.get('service'),
-            'geometry': data.get('geometry')
-        })
-    df = pd.DataFrame(records)
-    if not df.empty:
-        gdf = gdf.merge(df, on=['u', 'v', 'key'], how='left')
-    return gdf
+    if adapter_config is None:
+        adapter_config = {}
+    if 'network_type' not in adapter_config:
+        adapter_config['network_type'] = network_type
+
+    adapter = get_adapter(source, adapter_type, adapter_config)
+    return adapter.load_data(source)
 
 
-def flag_narrow_streets(edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def extract_edges(data: Any, adapter_type: Optional[str] = None,
+                  adapter_config: Optional[Dict[str, Any]] = None) -> gpd.GeoDataFrame:
+    if isinstance(data, gpd.GeoDataFrame):
+        return data
+
+    if adapter_type is None:
+        if isinstance(data, nx.MultiDiGraph):
+            adapter_type = 'osm'
+        elif hasattr(data, 'crs'):
+            adapter_type = 'shapefile'
+        else:
+            raise ValueError(
+                "Could not determine adapter type for data. Please specify adapter_type.")
+
+    adapter = get_adapter(adapter_type, adapter_type, adapter_config)
+    return adapter.extract_edges(data)
+
+
+def assess_street_quality(edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    identify edges meeting narrow‑street criteria and assign a score 
+    Identify edges meeting quality street criteria and assign a quality score
     """
     df = edges.copy()
-    # convert numeric fields
     for col in ['width', 'lanes', 'maxspeed']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-    # define criterias !
+
     crit = []
     crit.append(df['width'] < 6 if 'width' in df else pd.Series(
         False, index=df.index))
@@ -60,7 +62,25 @@ def flag_narrow_streets(edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         False, index=df.index))
 
     mask = pd.concat(crit, axis=1).any(axis=1)
-    narrow = df[mask].copy()
+    quality_streets = df[mask].copy()
     met = pd.concat(crit, axis=1).sum(axis=1)
-    narrow['score'] = met[mask] / len(crit)
-    return narrow
+    quality_streets['quality_score'] = met[mask] / len(crit)
+    return quality_streets
+
+
+def load_and_process(source: str, network_type: str = 'drive',
+                     adapter_type: Optional[str] = None,
+                     adapter_config: Optional[Dict[str, Any]] = None) -> Dict[str, gpd.GeoDataFrame]:
+    """
+    Complete pipeline to load, extract, and assess street quality in one steps
+    """
+    data = load_network(source, network_type, adapter_type, adapter_config)
+
+    edges = extract_edges(data, adapter_type, adapter_config)
+
+    quality_streets = assess_street_quality(edges)
+
+    return {
+        'edges': edges,
+        'quality_streets': quality_streets
+    }

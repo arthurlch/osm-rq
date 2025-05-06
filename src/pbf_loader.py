@@ -1,12 +1,11 @@
 import os
+import networkx as nx
 from pyrosm import OSM
 import osmnx as ox
 
 
-def load_pbf_network(source: str, network_type: str = 'drive') -> ox.graph.Graph:
-    """
-    Load a street network from a .osm.pbf file via pyrosm, then convert to OSMnx graph.
-    """
+def load_pbf_network(source: str, network_type: str = 'drive') -> nx.MultiDiGraph:
+
     if not os.path.isfile(source):
         raise FileNotFoundError(f"PBF file not found: {source}")
     osm = OSM(source)
